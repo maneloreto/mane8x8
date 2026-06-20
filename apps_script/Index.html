@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <style>
+    :root { --bg:#f6f8fa; --card:#fff; --line:#e1e4e8; --accent:#2563eb; --danger:#dc2626; --muted:#6b7280; }
+    * { box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+           background: var(--bg); color: #111827; margin: 0; padding: 24px; }
+    .wrap { max-width: 760px; margin: 0 auto; }
+    h1 { font-size: 20px; margin: 0 0 16px; }
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; }
+    input[type=text] { flex: 1 1 180px; padding: 9px 11px; border: 1px solid var(--line); border-radius: 8px; font-size: 14px; }
+    input[type=text]:focus { outline: 2px solid var(--accent); border-color: var(--accent); }
+    button { padding: 9px 14px; border: 0; border-radius: 8px; font-size: 14px; cursor: pointer; }
+    .primary { background: var(--accent); color: #fff; }
+    .primary:disabled { opacity: .5; cursor: default; }
+    .ghost { background: #f3f4f6; color: #111827; }
+    .link { background: none; padding: 4px 8px; color: var(--accent); }
+    .link.danger { color: var(--danger); }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--line); font-size: 14px; vertical-align: middle; }
+    th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .03em; }
+    td.actions { text-align: right; white-space: nowrap; }
+    td input[type=text] { width: 100%; }
+    .meta { color: var(--muted); font-size: 12px; }
+    .empty, .loading { color: var(--muted); padding: 20px 8px; text-align: center; }
+    #toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+             background: #111827; color: #fff; padding: 10px 16px; border-radius: 8px; font-size: 14px;
+             opacity: 0; transition: opacity .2s; pointer-events: none; max-width: 90%; }
+    #toast.show { opacity: 1; }
+    #toast.error { background: var(--danger); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Entries</h1>
+
+    <div class="card">
+      <form id="add-form" class="row" autocomplete="off">
+        <input type="text" id="firstName" placeholder="First name" />
+        <input type="text" id="lastName" placeholder="Last name" />
+        <button type="submit" class="primary" id="add-btn">Add entry</button>
+      </form>
+    </div>
+
+    <div class="card">
+      <table>
+        <thead>
+          <tr><th>First name</th><th>Last name</th><th>Updated</th><th></th></tr>
+        </thead>
+        <tbody id="tbody">
+          <tr><td colspan="4" class="loading">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div id="toast"></div>
+
+  <script>
+    var entries = [];
+    var editingId = null;
+    var busy = false;
+
+    function esc(s) {
+      return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+        return { '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c];
+      });
+    }
+
+    function fmt(iso) {
+      if (!iso) return '';
+      var d = new Date(iso);
+      if (isNaN(d.getTime())) return '';
+      return d.toLocaleString();
+    }
+
+    function toast(msg, isError) {
+      var t = document.getElementById('toast');
+      t.textContent = msg;
+      t.className = 'show' + (isError ? ' error' : '');
+      clearTimeout(toast._t);
+      toast._t = setTimeout(function () { t.className = ''; }, 3000);
+    }
+
+    function setBusy(b) {
+      busy = b;
+      document.getElementById('add-btn').disabled = b;
+    }
+
+    function render() {
+      var tbody = document.getElementById('tbody');
+      if (!entries.length) {
+        tbody.innerHTML = '<tr><td colspan="4" class="empty">No entries yet. Add one above.</td></tr>';
+        return;
+      }
+      tbody.innerHTML = entries.map(function (e) {
+        if (e.id === editingId) {
+          return '<tr data-id="' + esc(e.id) + '">' +
+            '<td><input type="text" class="edit-first" value="' + esc(e.firstName) + '"></td>' +
+            '<td><input type="text" class="edit-last" value="' + esc(e.lastName) + '"></td>' +
+            '<td class="meta">' + esc(fmt(e.updated)) + '</td>' +
+            '<td class="actions">' +
+              '<button class="link" data-act="save">Save</button>' +
+              '<button class="link" data-act="cancel">Cancel</button>' +
+            '</td></tr>';
+        }
+        return '<tr data-id="' + esc(e.id) + '">' +
+          '<td>' + esc(e.firstName) + '</td>' +
+          '<td>' + esc(e.lastName) + '</td>' +
+          '<td class="meta">' + esc(fmt(e.updated)) + '</td>' +
+          '<td class="actions">' +
+            '<button class="link" data-act="edit">Edit</button>' +
+            '<button class="link danger" data-act="delete">Delete</button>' +
+          '</td></tr>';
+      }).join('');
+    }
+
+    function onData(list) {
+      entries = list || [];
+      editingId = null;
+      setBusy(false);
+      render();
+    }
+
+    function onError(err) {
+      setBusy(false);
+      render();
+      toast((err && err.message) ? err.message : 'Something went wrong.', true);
+    }
+
+    function load() {
+      google.script.run.withSuccessHandler(onData).withFailureHandler(onError).getEntries();
+    }
+
+    document.getElementById('add-form').addEventListener('submit', function (ev) {
+      ev.preventDefault();
+      if (busy) return;
+      var first = document.getElementById('firstName');
+      var last = document.getElementById('lastName');
+      if (!first.value.trim() && !last.value.trim()) {
+        toast('Enter a first or last name.', true);
+        return;
+      }
+      setBusy(true);
+      google.script.run.withSuccessHandler(function (list) {
+        first.value = ''; last.value = ''; first.focus();
+        onData(list);
+        toast('Added.');
+      }).withFailureHandler(onError).addEntry({ firstName: first.value, lastName: last.value });
+    });
+
+    document.getElementById('tbody').addEventListener('click', function (ev) {
+      var btn = ev.target.closest('button');
+      if (!btn || busy) return;
+      var tr = ev.target.closest('tr');
+      var id = tr && tr.getAttribute('data-id');
+      var act = btn.getAttribute('data-act');
+
+      if (act === 'edit') { editingId = id; render(); return; }
+      if (act === 'cancel') { editingId = null; render(); return; }
+      if (act === 'save') {
+        var first = tr.querySelector('.edit-first').value;
+        var last = tr.querySelector('.edit-last').value;
+        setBusy(true);
+        google.script.run.withSuccessHandler(function (list) {
+          onData(list); toast('Saved.');
+        }).withFailureHandler(onError).updateEntry({ id: id, firstName: first, lastName: last });
+        return;
+      }
+      if (act === 'delete') {
+        if (!window.confirm('Delete this entry?')) return;
+        setBusy(true);
+        google.script.run.withSuccessHandler(function (list) {
+          onData(list); toast('Deleted.');
+        }).withFailureHandler(onError).deleteEntry(id);
+      }
+    });
+
+    load();
+  </script>
+</body>
+</html>
